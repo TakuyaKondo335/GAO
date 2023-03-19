@@ -5,11 +5,19 @@ import serial
 import os
 import config
 import random
+import openai
 from discord.ext import commands
+from datetime import datetime, timedelta
+
+# OpenAI APIの初期化
+openai.api_key = config.OPENAI_API_KEY
+model_engine = "davinci"
 
 intents = discord.Intents.default()
 intents.message_content = True
 client = discord.Client(intents=intents)
+
+
 
 # ユーザーごとの投稿回数を格納する辞書
 post_count = {}
@@ -47,6 +55,61 @@ def caution_message(author_name):
         return "ちょっと発言に注意ギャオ"
     else:
         return "怒ったギャオ"
+
+
+# レポートを生成する関数
+async def generate_report(channel_id):
+    # 過去半日のメッセージを取得する
+    channel = client.get_channel(channel_id)
+    messages = []
+    async for message in channel.history(limit=50):
+        messages.append(message)
+
+    # メッセージを結合する
+    message_text = "\n".join([message.content for message in messages])
+
+    # OpenAI APIで文章を生成する
+    prompt = f"Summarize the events of the past half day in this Discord channel: {message_text}"
+    response = openai.Completion.create(
+        engine=model_engine,
+        prompt=prompt,
+        max_tokens=1024,
+        n=1,
+        stop=None,
+        temperature=0.5,
+    )
+
+    # 生成された文章をDiscordに投稿する
+    response_text = response.choices[0].text.strip()
+    if len(response_text) <= 2000:
+        await channel.send(response_text)
+    else:
+        await channel.send("生成された文章が2000文字を超えています。分割して送信してください。")
+
+
+
+
+
+
+# 過去の出来事をOpenAI APIを使用して取得する関数
+def get_events(start_date, end_date):
+    start_date_str = start_date.strftime("%Y-%m-%d")
+    end_date_str = end_date.strftime("%Y-%m-%d")
+    query = f"events that happened between {start_date_str} and {end_date_str}"
+    response = openai.Completion.create(
+        engine="davinci",
+
+        prompt=f"Get events happened in past 12 hours. {query}.",
+        # prompt=f"Get {query}.",
+        temperature=0.5,
+        max_tokens=1024,
+        n=1,
+        stop=None,
+        timeout=10,
+    )
+    events = response.choices[0].text.strip().split("\n")
+    events = [{"text": event.strip()} for event in events]
+    return events
 
 
 #When on_ready
@@ -189,5 +252,19 @@ async def on_message(message):
         await message.channel.send("メッセージは燃やされてしまった。http:" + str(unicodeEmoji) + str(unicodeEmoji) + str(unicodeEmoji) + str(unicodeEmoji))
 
 # 褒めてくれるGAOくんも実装する。後ほど。
+
+
+
+
+
+# メッセージ受信時の処理
+# @client.event
+# async def on_message(message):
+#     if message.author == client.user:
+#         return
+
+    if message.content == "レポート作成":
+        await generate_report(message.channel.id)
+
 
 client.run(config.DISCORD_TOKEN)
